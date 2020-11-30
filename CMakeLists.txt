@@ -3,71 +3,95 @@
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
 
+# ##########
+# fv3-bundle
+# ##########
 
-# # ------------------------------------------------------------------------- #
-# # fv3-bundle for building all the components needed for the JEDI-FV3 system #
-# # ------------------------------------------------------------------------- #
-
-
-# Preamble
-# --------
-
-# Check for minimim cmake requirement
 cmake_minimum_required( VERSION 3.12 FATAL_ERROR )
 
-# Create project
-project( fv3-bundle VERSION 1.0.0 LANGUAGES C CXX Fortran )
+project( fv3-bundle LANGUAGES C CXX Fortran )
 
-# Include ecbuild_bundle macro
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
 include( ecbuild_bundle )
 
-# Default build mode, change with --build=[release]|debug|bit
+# Default release mode
 set( ECBUILD_DEFAULT_BUILD_TYPE Release )
 
 # Enable MPI
 set( ENABLE_MPI ON CACHE BOOL "Compile with MPI" )
 
-
-# Initialize bundle
-# -----------------
+# Initialize
 ecbuild_bundle_initialize()
-
-
-# Add packages to the bundle
-# --------------------------
-
-# jedi-cmake
 ecbuild_bundle( PROJECT jedicmake GIT "https://github.com/jcsda/jedi-cmake.git" BRANCH develop UPDATE )
 
-# ECMWF libraries
-find_package( eckit 1.11.6 QUIET)
-if (${eckit_FOUND})
-  message(STATUS "Found ECKIT package, not building as part of the bundle" )
-else()
-  ecbuild_bundle( PROJECT eckit GIT "https://github.com/jcsda-internal/eckit.git" TAG 1.11.jcsda )
-endif()
-ecbuild_bundle( PROJECT fckit GIT "https://github.com/jcsda-internal/fckit.git" TAG 0.7.jcsda )
-ecbuild_bundle( PROJECT atlas GIT "https://github.com/jcsda-internal/atlas.git" TAG 0.20.jcsda )
+# ECMWF libs
+# ----------
+option("BUNDLE_SKIP_ECKIT" "Don't build eckit" "ON" ) # Skip eckit build unless user passes -DBUNDLE_SKIP_ECKIT=OFF
+option("BUNDLE_SKIP_FCKIT" "Don't build fckit" "OFF") # Build fckit unless user passes -DBUNDLE_SKIP_FCKIT=ON
+option("BUNDLE_SKIP_ATLAS" "Don't build atlas" "OFF") # Build atlas unless user passes -DBUNDLE_SKIP_ATLAS=ON
+
+ecbuild_bundle( PROJECT eckit GIT "https://github.com/jcsda/eckit.git" BRANCH release-stable UPDATE )
+ecbuild_bundle( PROJECT fckit GIT "https://github.com/jcsda/fckit.git" BRANCH release-stable UPDATE )
+ecbuild_bundle( PROJECT atlas GIT "https://github.com/jcsda/atlas.git" BRANCH release-stable UPDATE )
+
+# External (optional) observation operators
+# ------------------------------
+option("BUNDLE_SKIP_GEOS-AERO" "Don't build GEOS-AERO" "ON") # Skip geos-aero build unless user passes -DBUNDLE_SKIP_GEOS-AERO=OFF
+option("BUNDLE_SKIP_GSW"       "Don't build GSW"       "ON") # Skip gsw build unless user passes -DBUNDLE_SKIP_GSW=OFF
+option("BUNDLE_SKIP_ROPP-UFO"  "Don't build ROPP-UFO"  "ON") # Skip ropp-ufo build unless user passes -DBUNDLE_SKIP_ROPP-UFO=OFF
+
+ecbuild_bundle( PROJECT geos-aero GIT "https://github.com/jcsda/geos-aero.git" BRANCH develop UPDATE )
+ecbuild_bundle( PROJECT gsw GIT "https://github.com/jcsda/GSW-Fortran.git"     BRANCH develop UPDATE )
+ecbuild_bundle( PROJECT ropp-ufo GIT "https://github.com/jcsda/ropp-test.git"  BRANCH develop UPDATE )
 
 # External (required) observation operators
-ecbuild_bundle( PROJECT crtm GIT "https://github.com/jcsda/crtm.git"   TAG v2.3-jedi )
+# ------------------------------
+option("BUNDLE_SKIP_CRTM" "Don't build CRTM" "OFF") # Skip crtm build unless user passes -DBUNDLE_SKIP_CRTM=ON
+ecbuild_bundle( PROJECT crtm GIT "/scratch1/NCEPDEV/da/Mark.Potts/fv3-bundle/crtm" BRANCH release/crtm_jedi UPDATE )
 
 # Core JEDI repositories
+# ----------------------
 ecbuild_bundle( PROJECT oops  GIT "https://github.com/jcsda/oops.git"  BRANCH develop UPDATE )
 ecbuild_bundle( PROJECT saber GIT "https://github.com/jcsda/saber.git" BRANCH develop UPDATE )
 ecbuild_bundle( PROJECT ioda  GIT "https://github.com/jcsda/ioda.git"  BRANCH develop UPDATE )
 ecbuild_bundle( PROJECT ufo   GIT "https://github.com/jcsda/ufo.git"   BRANCH develop UPDATE )
+#ecbuild_bundle( PROJECT ewok  GIT "/scratch1/NCEPDEV/da/Mark.Potts/sandbox/fv3-bundle/ewok"  BRANCH develop UPDATE )
 
-# FMS and FV3 dynamical core
-ecbuild_bundle( PROJECT fms GIT "https://github.com/jcsda/FMS.git"                     TAG 1.0.0.jcsda )
-ecbuild_bundle( PROJECT fv3 GIT "https://github.com/jcsda/GFDL_atmos_cubed_sphere.git" TAG 1.0.0.jcsda )
+# Options for building with certain models
+# ----------------------------------------
+set(FV3_FORECAST_MODEL "FV3CORE" CACHE STRING "Choose which MODEL to build with")
+set_property(CACHE FV3_FORECAST_MODEL PROPERTY STRINGS "FV3CORE" "UFS" "GEOS")
+if(NOT FV3_FORECAST_MODEL MATCHES "^(FV3CORE|UFS|GEOS)$")
+  ecbuild_error("Valid options for -DFV3_FORECAST_MODEL are FV3CORE|UFS|GEOS")
+endif()
+ecbuild_info("Building with FV3-based model: ${FV3_FORECAST_MODEL}")
+
+# FMS and FV3 dynamical core model are needed for FV3CORE
+# -------------------------------------------------------
+if (FV3_FORECAST_MODEL MATCHES "FV3CORE")
+  option("BUNDLE_SKIP_FMS" "Don't build FMS" "OFF")
+  ecbuild_bundle( PROJECT fms GIT "https://github.com/jcsda/FMS.git" BRANCH release-stable-ecbuild UPDATE )
+  ecbuild_bundle( PROJECT fv3 GIT "https://github.com/jcsda/GFDL_atmos_cubed_sphere.git" BRANCH release-stable UPDATE )
+endif()
+
+# fv3-jedi linear model
+# ---------------------
+ecbuild_bundle( PROJECT fv3-jedi-lm GIT "https://github.com/jcsda/fv3-jedi-linearmodel.git" BRANCH develop UPDATE )
 
 # fv3-jedi and associated repositories
-ecbuild_bundle( PROJECT femps       GIT "https://github.com/jcsda/femps.git"                BRANCH develop UPDATE )
-ecbuild_bundle( PROJECT fv3-jedi-lm GIT "https://github.com/jcsda/fv3-jedi-linearmodel.git" BRANCH develop UPDATE )
-ecbuild_bundle( PROJECT fv3-jedi    GIT "https://github.com/jcsda/fv3-jedi.git"             BRANCH develop UPDATE )
+# ------------------------------------
+ecbuild_bundle( PROJECT femps    GIT "https://github.com/jcsda/femps.git"    BRANCH develop UPDATE )
+#ecbuild_bundle( PROJECT fv3-jedi GIT "/scratch1/NCEPDEV/da/Mark.Potts/sandbox/fv3-bundle/fv3-jedi" BRANCH feature/ufs UPDATE )
+#ecbuild_bundle( PROJECT fv3-jedi GIT "https://github.com/jcsda/fv3-jedi.git" BRANCH develop UPDATE )
+ecbuild_bundle( PROJECT fv3-jedi GIT "git@github.com:rsdunlapiv/fv3-jedi.git" BRANCH feature/ufs UPDATE )
 
 
-# Finalize bundle
-# ---------------
+# Build Doxygen documentation
+# ---------------------------
+option(BUILD_FV3_BUNDLE_DOC "Build documentation" OFF)
+if(BUILD_FV3_BUNDLE_DOC)
+   add_subdirectory( Documentation )
+endif(BUILD_FV3_BUNDLE_DOC)
+
 ecbuild_bundle_finalize()
